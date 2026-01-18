@@ -3,12 +3,20 @@
 Exposes Grok's agentic search capabilities (web + X) via MCP.
 """
 
+import logging
 import os
 
 from mcp.server.fastmcp import FastMCP
 from xai_sdk import Client
 from xai_sdk.chat import user
 from xai_sdk.tools import web_search, x_search
+
+# Configure logging to stderr (required for MCP - stdout is JSON-RPC)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger("grok-search-mcp")
 
 mcp = FastMCP("Grok Agentic Search")
 
@@ -29,35 +37,46 @@ def agentic_search(query: str) -> str:
     """
     api_key = os.getenv("XAI_API_KEY")
     if not api_key:
-        return "Error: XAI_API_KEY environment variable not set"
+        logger.error("XAI_API_KEY environment variable not set")
+        raise ValueError("XAI_API_KEY environment variable not set")
 
-    client = Client(api_key=api_key)
-    chat = client.chat.create(
-        model="grok-4-1-fast",
-        tools=[
-            web_search(enable_image_understanding=True),
-            x_search(
-                enable_image_understanding=True,
-                enable_video_understanding=True,
-            ),
-        ],
-    )
+    logger.info(f"Starting agentic search for: {query[:100]}...")
 
-    chat.append(user(query))
-    response = chat.sample()
+    try:
+        client = Client(api_key=api_key)
+        chat = client.chat.create(
+            model="grok-4-1-fast",
+            tools=[
+                web_search(enable_image_understanding=True),
+                x_search(
+                    enable_image_understanding=True,
+                    enable_video_understanding=True,
+                ),
+            ],
+            include=["inline_citations"],
+        )
 
-    # Format output: result + citations
-    result = response.content or ""
+        chat.append(user(query))
+        response = chat.sample()
 
-    if response.citations:
-        citations = "\n".join(f"- {url}" for url in response.citations)
-        result += f"\n\n---\nCitations:\n{citations}"
+        # Format output: result + citations
+        result = response.content or ""
 
-    return result
+        if response.citations:
+            citations = "\n".join(f"- {url}" for url in response.citations)
+            result += f"\n\n---\nCitations:\n{citations}"
+
+        logger.info(f"Search completed. Found {len(response.citations or [])} citations")
+        return result
+
+    except Exception as e:
+        logger.exception(f"Error during agentic search: {e}")
+        raise RuntimeError(f"Search failed: {e}") from e
 
 
 def main():
     """Run the MCP server."""
+    logger.info("Starting Grok Agentic Search MCP server")
     mcp.run()
 
 
