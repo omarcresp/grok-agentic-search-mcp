@@ -1,19 +1,22 @@
-# Grok Agentic Search MCP Server
+# Agentic Search MCP Server
 
-An MCP server that exposes Grok's agentic search capabilities to AI agents like Claude. Uses `grok-4-1-fast` to perform deep, reasoned searches across the web and X (Twitter).
+An MCP server that provides agentic search capabilities to AI agents. Performs deep, reasoned searches across the web and social media with iterative refinement.
 
 ## Features
 
-- **Agentic search**: Grok iteratively analyzes results and makes follow-up queries to find comprehensive information
-- **Web + X search**: Searches both the web and X posts
+- **Agentic search**: Iteratively analyzes results and makes follow-up queries
+- **Web + social media**: Searches both the web and social posts
 - **Image & video understanding**: Analyzes visual content found during search
-- **Inline citations**: Returns source URLs embedded in results with full citation list
+- **Inline citations**: Returns source URLs embedded in results
+- **Depth control**: Standard (fast) or deep (thorough reasoning) modes
 
 ## Requirements
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/) (recommended) or pip
 - xAI API key (get one at [console.x.ai](https://console.x.ai))
+
+> **Note**: Currently uses xAI Grok as the underlying model. Implementation is swappable.
 
 ## Installation
 
@@ -90,23 +93,44 @@ After saving, **quit and restart** Claude Desktop completely (not just close the
 
 ### `agentic_search`
 
-Perform a deep, reasoned search using Grok's agentic capabilities.
+Perform a deep, reasoned search across the web and social media.
 
-**Input:**
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | string | required | The search query or question to research |
+| `depth` | `"standard"` \| `"deep"` | `"standard"` | Search depth. Use `"deep"` for complex research |
+
+**Depth modes:**
+- `standard`: Fast search (~2 min timeout)
+- `deep`: Thorough research with extended reasoning (~10 min timeout)
+
+**Output:**
 ```json
 {
-  "query": "string - The search query or question to research"
+  "result": "Synthesized answer with inline citations",
+  "citations": ["https://source1.com", "https://source2.com"],
+  "source_count": 5,
+  "depth": "standard"
 }
 ```
 
-**Output:**
-Search results synthesized by Grok with inline citation links and a full citations list at the end.
+## Examples
 
-## Example Queries
+**Standard depth (fast, everyday use):**
+```json
+{"query": "Latest news on AI regulation"}
+{"query": "Community sentiment on Rust vs Go for CLI tools"}
+{"query": "Recent mass layoffs in tech industry"}
+```
 
-- "What are the latest developments in MCP (Model Context Protocol)?"
-- "What is the community sentiment on X about Rust vs Go for CLI tools?"
-- "Recent news about xAI and Grok models"
+**Deep depth (complex analysis):**
+```json
+{"query": "Compare transformer architectures evolution and future directions", "depth": "deep"}
+{"query": "Security implications of MCP servers across implementations", "depth": "deep"}
+{"query": "Analyze tradeoffs of major AI agent frameworks for production", "depth": "deep"}
+```
 
 ## Development
 
