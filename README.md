@@ -9,7 +9,7 @@
 
 ## Why Use This?
 
-Most search tools return links. This MCP server returns *answers* — synthesized from multiple sources with inline citations. It iteratively refines queries, analyzes images and videos found during search, and pulls from both web and social media.
+Most search tools return links. This MCP server returns *answers* — synthesized from multiple sources with inline citations. It uses xAI's current `grok-4.3` model with server-side Web Search and X Search, analyzes images and videos found during search, and pulls from both web and social media.
 
 **Perfect for:**
 - Research tasks requiring current information
@@ -162,13 +162,23 @@ Add to your `opencode.json`:
 |-----------|------|---------|-------------|
 | `query` | string | *required* | The search query or question |
 | `depth` | `"standard"` \| `"deep"` | `"standard"` | Search thoroughness |
+| `allowed_domains` | string[] | `null` | Limit Web Search to these domains (max 5) |
+| `excluded_domains` | string[] | `null` | Exclude these domains from Web Search (max 5) |
+| `allowed_x_handles` | string[] | `null` | Limit X Search to these handles (max 20) |
+| `excluded_x_handles` | string[] | `null` | Exclude these handles from X Search (max 20) |
+| `from_date` | string | `null` | Start date for X Search results, ISO8601 format |
+| `to_date` | string | `null` | End date for X Search results, ISO8601 format |
+| `enable_image_understanding` | boolean | `true` | Analyze images found during Web Search and X Search |
+| `enable_video_understanding` | boolean | `true` | Analyze videos found during X Search |
+
+`allowed_domains` cannot be combined with `excluded_domains`; `allowed_x_handles` cannot be combined with `excluded_x_handles`.
 
 ### Depth Modes
 
 | Mode | Use Case | Timeout |
 |------|----------|---------|
-| `standard` | Quick lookups, recent news, simple questions | ~2 min |
-| `deep` | Complex research, multi-faceted analysis, academic questions | ~10 min |
+| `standard` | Quick lookups, recent news, simple questions. Uses `grok-4.3` with `reasoning_effort="none"` | ~2 min |
+| `deep` | Complex research, multi-faceted analysis, academic questions. Uses `grok-4.3` with `reasoning_effort="high"` | ~10 min |
 
 ### Example Queries
 
@@ -193,6 +203,7 @@ Add to your `opencode.json`:
   "result": "Synthesized answer with [inline citations](https://source.com)...",
   "citations": ["https://source1.com", "https://source2.com"],
   "source_count": 12,
+  "model_used": "grok-4.3",
   "depth": "standard"
 }
 ```
