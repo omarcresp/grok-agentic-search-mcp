@@ -89,7 +89,7 @@ def runner(record, store, source, responses):
 
 
 async def test_deep_end_to_end_saved_quotes_and_no_source_text_in_tool(record, store, source):
-    record.options.source_urls = [source.url]
+    record.options.query += f" Read {source.url}."
     run, backend, reader = runner(record, store, source, script())
     output = await run.run()
     assert output.status == "completed" and output.verification == "grok_reviewed"

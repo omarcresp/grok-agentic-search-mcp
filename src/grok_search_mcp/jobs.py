@@ -5,7 +5,7 @@ import os
 from contextlib import suppress
 from uuid import uuid4
 
-from .models import JobInfo, RunRecord, SearchOptions, SearchResult
+from .models import JobInfo, RunRecord, SearchOptions, SearchResult, research_defaults
 from .research import ResearchRunner, public_result, reusable_sources
 from .store import ResearchStore, owner_alive
 
@@ -107,22 +107,12 @@ class ResearchJobs:
         research_id: str,
         *,
         query: str | None = None,
-        max_cost_usd: float = 3,
-        timeout_seconds: float = 600,
-        max_rounds: int = 2,
     ) -> JobInfo:
         parent = self.get_record(research_id)
         if parent.output.status in ("queued", "running"):
             raise ValueError("Research is still active; wait or cancel it before resuming")
-        values = parent.options.model_dump()
-        values.update(
-            query=parent.options.query if query is None else query,
-            depth="deep",
-            parent_research_id=research_id,
-            max_cost_usd=max_cost_usd,
-            timeout_seconds=timeout_seconds,
-            max_rounds=max_rounds,
-        )
+        values = research_defaults(parent.options.query if query is None else query).model_dump()
+        values["parent_research_id"] = research_id
         values["source_urls"] = list(
             dict.fromkeys(
                 parent.options.source_urls

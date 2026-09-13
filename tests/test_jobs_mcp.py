@@ -10,6 +10,7 @@ from test_research import Backend, Reader, script
 from grok_search_mcp import server
 from grok_search_mcp.jobs import ResearchJobs
 from grok_search_mcp.models import SearchOptions
+from grok_search_mcp.provider import Completion
 from grok_search_mcp.research import ResearchRunner, reusable_sources
 
 
@@ -26,7 +27,17 @@ def jobs_with_fixtures(store, source):
 
 async def test_background_persist_resume_and_evidence(store, source):
     jobs = jobs_with_fixtures(store, source)
-    job = jobs.start(SearchOptions(query="Which limits apply?", depth="deep"))
+    job = jobs.start(
+        SearchOptions(
+            query="Which limits apply?",
+            depth="deep",
+            max_cost_usd=0.2,
+            timeout_seconds=60,
+            max_rounds=1,
+            allowed_domains=["example.com"],
+            include_x=False,
+        )
+    )
     await jobs.tasks[job.research_id]
     result = jobs.get(job.research_id)
     assert result.status == "completed"
@@ -37,6 +48,9 @@ async def test_background_persist_resume_and_evidence(store, source):
     saved = store.load(resumed.research_id)
     assert resumed.research_id != job.research_id
     assert saved.options.parent_research_id == job.research_id
+    assert saved.options.max_cost_usd == 3 and saved.options.timeout_seconds == 600
+    assert saved.options.max_rounds == 2
+    assert saved.options.allowed_domains == [] and saved.options.include_x
     assert saved.output.sources[0].text == source.text and saved.output.usage.model_calls == 0
     await jobs.tasks[resumed.research_id]
     assert jobs.get(job.research_id).status == "completed"
@@ -101,16 +115,33 @@ async def test_actual_mcp_schema_tools_resource_and_serialization(monkeypatch, s
     async with create_connected_server_and_client_session(server.mcp) as session:
         definitions = {t.name: t for t in (await session.list_tools()).tools}
         assert len(definitions) == 6
-        assert "ctx" not in definitions["agentic_search"].inputSchema["properties"]
+        expected_inputs = {
+            "agentic_search": {"query", "depth", "source_urls"},
+            "research_start": {"query", "depth", "source_urls"},
+            "research_get": {"research_id"},
+            "research_cancel": {"research_id"},
+            "research_resume": {"research_id", "query"},
+            "read_evidence": {"research_id", "source_id", "offset"},
+        }
+        for name, expected in expected_inputs.items():
+            assert set(definitions[name].inputSchema["properties"]) == expected
+        for name in ("agentic_search", "research_start"):
+            schema = definitions[name].inputSchema
+            assert schema["required"] == ["query"]
+            assert schema["properties"]["depth"]["default"] == "deep"
+            assert schema["properties"]["source_urls"]["default"] is None
         assert (
             definitions["agentic_search"].outputSchema["properties"]["citations"]["type"] == "array"
         )
-        result = await session.call_tool(
-            "agentic_search", {"query": "Which limits apply?", "depth": "deep"}
-        )
+        result = await session.call_tool("agentic_search", {"query": "Which limits apply?"})
         assert not result.isError
         data = result.structuredContent
         assert data["status"] == "completed" and isinstance(data["citations"], list)
+        options = store.load(data["research_id"]).options
+        assert options.depth == "deep" and options.include_x
+        assert options.max_rounds == 2 and options.max_cost_usd == 3
+        assert options.timeout_seconds == 600
+        assert options.allowed_domains == options.excluded_domains == []
         assert data["sources"][0]["text"] == ""
         assert json.loads(result.content[0].text)["citations"] == [source.url]
         manifest = await session.read_resource(data["evidence_uri"])
@@ -127,10 +158,9 @@ async def test_mcp_background_get_cancel_and_resume(monkeypatch, store, source):
     jobs = jobs_with_fixtures(store, source)
     monkeypatch.setattr(server, "_jobs", jobs)
     async with create_connected_server_and_client_session(server.mcp) as session:
-        launched = await session.call_tool(
-            "research_start", {"options": {"query": "Which limits apply?", "depth": "deep"}}
-        )
+        launched = await session.call_tool("research_start", {"query": "Which limits apply?"})
         research_id = launched.structuredContent["research_id"]
+        assert store.load(research_id).options.depth == "deep"
         task = jobs.tasks.get(research_id)
         if task:
             await task
@@ -142,16 +172,6 @@ async def test_mcp_background_get_cancel_and_resume(monkeypatch, store, source):
             "research_cancel", {"research_id": resumed.structuredContent["research_id"]}
         )
         assert cancelled.structuredContent["status"] in ("completed", "cancelled")
-
-
-async def test_iso_z_dates_work_on_minimum_python(monkeypatch):
-    from types import SimpleNamespace
-    from unittest.mock import AsyncMock
-
-    jobs = SimpleNamespace(search=AsyncMock())
-    monkeypatch.setattr(server, "_jobs", jobs)
-    await server.agentic_search("q", from_date="2026-09-12T00:00:00Z")
-    assert jobs.search.call_args.args[0].from_date.hour == 0
 
 
 async def test_mcp_shutdown_cancels_active_background_job(monkeypatch, store):
@@ -166,7 +186,32 @@ async def test_mcp_shutdown_cancels_active_background_job(monkeypatch, store):
     jobs = ResearchJobs(store, runner_factory=WaitingRunner)
     monkeypatch.setattr(server, "_jobs", jobs)
     async with create_connected_server_and_client_session(server.mcp) as session:
-        launched = await session.call_tool("research_start", {"options": {"query": "q"}})
+        launched = await session.call_tool("research_start", {"query": "q"})
         research_id = launched.structuredContent["research_id"]
         await entered.wait()
     assert store.load(research_id).output.status == "cancelled"
+
+
+async def test_search_tools_accept_depth_and_source_overrides(monkeypatch, store, source):
+    jobs = ResearchJobs(
+        store,
+        runner_factory=partial(
+            ResearchRunner, backend_factory=lambda o, u: Backend(o, u, [Completion("Quick answer")])
+        ),
+    )
+    monkeypatch.setattr(server, "_jobs", jobs)
+    async with create_connected_server_and_client_session(server.mcp) as session:
+        for name in ("agentic_search", "research_start"):
+            result = await session.call_tool(
+                name,
+                {"query": "Which limits apply?", "depth": "standard", "source_urls": [source.url]},
+            )
+            assert not result.isError
+            research_id = result.structuredContent["research_id"]
+            if task := jobs.tasks.get(research_id):
+                await task
+            record = store.load(research_id)
+            assert record.options.depth == "standard"
+            assert record.options.source_urls == [source.url]
+            assert record.output.verification == "not_requested"
+            assert record.options.max_rounds == 2 and record.options.max_cost_usd == 3

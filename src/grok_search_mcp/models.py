@@ -20,6 +20,8 @@ class StrictModel(BaseModel):
 
 
 class SearchOptions(StrictModel):
+    """Internal execution settings for persistence and evaluations; not MCP tool input."""
+
     query: str = Field(min_length=1, max_length=20000)
     depth: Depth = "standard"
     allowed_domains: list[str] = Field(default_factory=list, max_length=5)
@@ -88,6 +90,13 @@ class SearchOptions(StrictModel):
         ):
             raise ValueError("X filters require include_x=True")
         return self
+
+
+def research_defaults(
+    query: str, depth: Depth = "deep", source_urls: list[str] | None = None
+) -> SearchOptions:
+    """Allow research depth and seed URLs while keeping execution policy server-owned."""
+    return SearchOptions(query=query, depth=depth, source_urls=source_urls or [])
 
 
 class ResearchPlan(StrictModel):
